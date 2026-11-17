@@ -629,7 +629,7 @@ mc_MTBD_SIR_SIRS <- function(re = 40, model = c("SIR", "SIRS", "BD"),
 # =====================================================================
 
 COR_TRAJ <- c("#935999", "#073A70")   # trajetorias (cores do seu PDF)
-COR_FENO <- c("#935999", "#073A70")   # fenogramas e arvores
+COR_FENO <- c("#935999", "#073A70")   # arvores e figura da aba Sobre
 
 # ---- extracao ---------------------------------------------------------
 
@@ -668,34 +668,6 @@ extrai_arvores <- function(resultados, min_tips = 3) {
   }
   list(arvores = arvores, tipos = tipos, reps = reps,
        inicio = vapply(arvores, inicio_mrca, numeric(1)))
-}
-
-# Caráter BM em cada arvore. Devolve, para cada arvore, um vetor indexado
-# pelo numero do no (1..Ntip = pontas, Ntip+1.. = nos internos).
-#   internos = "fastAnc"   -> pontas simuladas + nos reconstruidos (seu script)
-#   internos = "simulados" -> valores verdadeiros simulados em todos os nos
-simula_caracteres <- function(arvores, semente = 1, sig2 = 1,
-                              internos = c("fastAnc", "simulados")) {
-  internos <- match.arg(internos)
-  if (!is.null(semente) && !is.na(semente)) set.seed(semente)
-  lapply(arvores, function(tr) {
-    tryCatch({
-      nt <- ape::Ntip(tr)
-      vv <- numeric(nt + tr$Nnode)
-      if (internos == "simulados") {
-        v <- phytools::fastBM(tr, sig2 = sig2, internal = TRUE)
-        vv[match(names(v)[seq_len(nt)], tr$tip.label)] <- v[seq_len(nt)]
-        nos <- v[-seq_len(nt)]
-        vv[as.integer(names(nos))] <- nos
-      } else {
-        x   <- phytools::fastBM(tr, sig2 = sig2)
-        anc <- phytools::fastAnc(tr, x)
-        vv[seq_len(nt)] <- x[tr$tip.label]
-        vv[as.integer(names(anc))] <- anc
-      }
-      vv
-    }, error = function(e) NULL)
-  })
 }
 
 # Introducao da Linhagem B a partir dos dados (como no seu script)
@@ -801,44 +773,6 @@ plot_trajetorias <- function(trajs, variavel = "inf", cores = COR_TRAJ,
       lines(grade, m, type = "s", lwd = 2.5, col = cores[2])
     }
   }
-  invisible()
-}
-
-desenha_fenograma <- function(tr, vv, inicio = 0, col = "#0000ff20", lwd = 1) {
-  H <- phytools::nodeHeights(tr)
-  segments(H[, 1] + inicio, vv[tr$edge[, 1]],
-           H[, 2] + inicio, vv[tr$edge[, 2]], col = col, lwd = lwd)
-}
-
-plot_fenogramas <- function(info, valores, cores = COR_FENO, alpha = 0.4,
-                            intro2 = NA, xmax = NULL, familia = "") {
-  ok <- !vapply(valores, is.null, logical(1))
-  if (!any(ok)) return(grafico_vazio("Nenhuma árvore com >= 3 pontas", familia))
-  if (is.null(xmax)) xmax <- tempo_maximo(list(), info)
-  ylim <- range(unlist(valores[ok]))               # mesmo eixo Y nos 3 paineis
-  
-  op <- par(mfrow = c(3, 1), mar = c(0.5, 4.5, 2.0, 1.5), oma = c(4, 0, 0, 0),
-            family = familia, font.axis = 2, font.lab = 2, font.main = 2)
-  on.exit(par(op))
-  
-  painel <- function(idx, titulo, eixo_x) {
-    do.call(plot, c(list(NA, xlim = c(0, xmax), ylim = ylim, bty = "n",
-                         xaxt = if (eixo_x) "s" else "n", xlab = "",
-                         ylab = "caráter (BM)", main = titulo, col.main = "grey30"),
-                    estilo_eixos))
-    linha_intro2(intro2)
-    if (!length(idx))
-      text(xmax / 2, mean(ylim), "sem árvores com >= 3 pontas", col = "grey60")
-    for (i in idx)
-      desenha_fenograma(info$arvores[[i]], valores[[i]], info$inicio[i],
-                        col = adjustcolor(cores[info$tipos[i]], alpha.f = alpha))
-  }
-  painel(which(ok & info$tipos == 1L), "Linhagem A", FALSE)
-  painel(which(ok & info$tipos == 2L), "Linhagem B", FALSE)
-  painel(which(ok), "Sobrepostas", TRUE)
-  legend("topleft", c("Linhagem A", "Linhagem B"), col = cores, lwd = 3,
-         bty = "n", text.col = cores, text.font = 2)
-  mtext("Tempo", side = 1, outer = TRUE, line = 2.5, col = "grey45", font = 2)
   invisible()
 }
 
@@ -1354,10 +1288,6 @@ aba_sobre <- nav_panel(
         tags$li(HTML("<b>Trajetórias:</b> Número de infectados vivos de cada linhagem ao longo do
         tempo; o tracejado marca a entrada da Linhagem B. Dá para trocar
         por suscetíveis, recuperados ou amostras acumuladas e mostrar a mediana.")),
-        tags$li(HTML("<b>Fenogramas:</b> um caráter contínuo hipotético (um traço qualquer do
-        patógeno) evolui por movimento browniano ao longo de cada árvore. Cada ramo é desenhado do
-        valor do caráter no início ao valor no fim, no eixo do tempo, o que mostra como a
-        estrutura da árvore espalha a variação entre as amostras.")),
         tags$li(HTML("<b>Árvores:</b> As árvores reconstruídas de uma replicata, no eixo de tempo
         absoluto.")),
         tags$li(HTML("<b>Resumo:</b> Uma linha por replicata, com status, número de amostras, pico de
@@ -1465,17 +1395,6 @@ ui <- page_sidebar(
           downloadButton("pdf_traj", "PDF", class = "btn-sm w-100")
         ),
         plotOutput("g_traj", height = "520px")),
-    aba("Fenogramas",
-        tagList(
-          numericInput("bm_seed", "Semente do caráter", 1, step = 1),
-          numericInput("bm_sig2", "σ² (taxa BM)", 1, min = 0, step = 0.1),
-          radioButtons("bm_internos", "Nós internos",
-                       c("Reconstruídos (fastAnc)" = "fastAnc",
-                         "Simulados (verdadeiros)" = "simulados")),
-          sliderInput("alpha_feno", "Opacidade", 0.05, 1, 0.4, step = 0.05),
-          downloadButton("pdf_feno", "PDF", class = "btn-sm w-100")
-        ),
-        plotOutput("g_feno", height = "820px")),
     aba("Árvores",
         tagList(
           selectInput("rep_arvore", "Replicata", choices = NULL),
@@ -1575,10 +1494,6 @@ server <- function(input, output, session) {
   info    <- reactive(extrai_arvores(pronto()$resultados, min_tips = 3))
   intro2  <- reactive(tempo_intro2(trajs()))
   xmax    <- reactive(tempo_maximo(trajs(), info()))
-  valores <- reactive({
-    sig2 <- if (is.na(input$bm_sig2) || input$bm_sig2 <= 0) 1 else input$bm_sig2
-    simula_caracteres(info()$arvores, input$bm_seed, sig2, input$bm_internos)
-  })
   
   observe({
     d <- dados(); req(d)
@@ -1591,11 +1506,8 @@ server <- function(input, output, session) {
   desenha_traj <- function(fam = "") plot_trajetorias(
     trajs(), input$variavel, COR_TRAJ, input$alpha_traj, intro2(), xmax(),
     input$mediana, fam)
-  desenha_feno <- function(fam = "") plot_fenogramas(
-    info(), valores(), COR_FENO, input$alpha_feno, intro2(), xmax(), fam)
   
   output$g_traj <- renderPlot(desenha_traj(FONTE), res = 96)
-  output$g_feno <- renderPlot(desenha_feno(FONTE), res = 96)
   output$g_arvores <- renderPlot({
     req(input$rep_arvore)
     r <- as.integer(input$rep_arvore)
@@ -1640,10 +1552,6 @@ server <- function(input, output, session) {
   output$pdf_traj <- downloadHandler(
     filename = function() sprintf("trajetorias_%s.pdf", pronto()$model %||% "MC"),
     content  = function(file) salva_pdf(file, 8, 5, desenha_traj)
-  )
-  output$pdf_feno <- downloadHandler(
-    filename = function() sprintf("fenogramas_%s.pdf", pronto()$model %||% "MC"),
-    content  = function(file) salva_pdf(file, 8, 9, desenha_feno)
   )
   output$rds <- downloadHandler(
     filename = function() sprintf("mc_%s.rds", tolower(pronto()$model %||% "resultado")),
