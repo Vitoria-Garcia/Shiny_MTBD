@@ -859,8 +859,8 @@ plot_arvores_rep <- function(mp, cores = COR_FENO, xmax, intro2 = NA,
                     edge.color = cores[tipo], edge.width = 1.2,
                     x.lim = c(-t0, xmax - t0), no.margin = FALSE)
     ape::tiplabels(pch = 16, cex = 0.55, col = cores[tipo])
-    title(sprintf("Linhagem %d  ·  %d amostras  ·  MRCA em t = %.2f",
-                  tipo, ape::Ntip(tr), inicio_mrca(tr)),
+    title(sprintf("Linhagem %s  ·  %d amostras  ·  MRCA em t = %.2f",
+                  c("A", "B")[tipo], ape::Ntip(tr), inicio_mrca(tr)),
           col.main = "grey30", cex.main = 1)
     if (!is.na(intro2) && intro2 > 0)
       abline(v = intro2 - t0, lty = 2, col = "grey65")
@@ -1354,6 +1354,10 @@ aba_sobre <- nav_panel(
         tags$li(HTML("<b>Trajetórias:</b> Número de infectados vivos de cada linhagem ao longo do
         tempo; o tracejado marca a entrada da Linhagem B. Dá para trocar
         por suscetíveis, recuperados ou amostras acumuladas e mostrar a mediana.")),
+        tags$li(HTML("<b>Fenogramas:</b> um caráter contínuo hipotético (um traço qualquer do
+        patógeno) evolui por movimento browniano ao longo de cada árvore. Cada ramo é desenhado do
+        valor do caráter no início ao valor no fim, no eixo do tempo, o que mostra como a
+        estrutura da árvore espalha a variação entre as amostras.")),
         tags$li(HTML("<b>Árvores:</b> As árvores reconstruídas de uma replicata, no eixo de tempo
         absoluto.")),
         tags$li(HTML("<b>Resumo:</b> Uma linha por replicata, com status, número de amostras, pico de
@@ -1421,6 +1425,20 @@ css_secoes <- "
   font-size: 1.2rem !important;                 /* titulo longo: cabe numa linha */
 }
 .bslib-page-sidebar > .navbar .navbar-brand { color: #fff !important; }
+
+/* celular: a aba Sobre ocupa so a largura da tela */
+.sobre { width: 100%; min-width: 0; }
+#tabela, #log { width: 100%; min-width: 0; overflow-x: auto; }   /* Resumo e Log rolam para o lado */
+@media (max-width: 575.98px) {
+  .bslib-page-title { font-size: 1rem !important; line-height: 1.3; }
+  .sobre { padding: 0 .25rem 1.5rem; }
+  .sobre .figura { overflow-x: auto; }                 /* figura: arrasta para o lado */
+  .sobre .figura svg { min-width: 620px; }
+  .sobre .legenda-fig::before { content: '↔ arraste a figura para o lado. '; font-weight: 600; }
+  .sobre table td:first-child { white-space: normal; }
+  .sobre table th:nth-child(2),
+  .sobre table td:nth-child(2) { display: none; }      /* esconde a coluna 'No codigo' */
+}
 "
 
 # Montserrat em toda a interface: o navegador baixa do Google Fonts; sem
@@ -1434,6 +1452,7 @@ tema <- bs_theme(version = 5, primary = "#073A70",
 ui <- page_sidebar(
   title = "Modelos epidemiológicos de Nascimento e Morte dependentes da densidade para árvores filogenéticas · SIR / SIRS / BD",
   theme = tema,
+  fillable = FALSE,   # a pagina rola em vez de espremer os graficos (celular deitado)
   sidebar = barra_lateral,
   navset_card_tab(
     id = "abas",
@@ -1446,6 +1465,17 @@ ui <- page_sidebar(
           downloadButton("pdf_traj", "PDF", class = "btn-sm w-100")
         ),
         plotOutput("g_traj", height = "520px")),
+    aba("Fenogramas",
+        tagList(
+          numericInput("bm_seed", "Semente do caráter", 1, step = 1),
+          numericInput("bm_sig2", "σ² (taxa BM)", 1, min = 0, step = 0.1),
+          radioButtons("bm_internos", "Nós internos",
+                       c("Reconstruídos (fastAnc)" = "fastAnc",
+                         "Simulados (verdadeiros)" = "simulados")),
+          sliderInput("alpha_feno", "Opacidade", 0.05, 1, 0.4, step = 0.05),
+          downloadButton("pdf_feno", "PDF", class = "btn-sm w-100")
+        ),
+        plotOutput("g_feno", height = "820px")),
     aba("Árvores",
         tagList(
           selectInput("rep_arvore", "Replicata", choices = NULL),
@@ -1459,7 +1489,24 @@ ui <- page_sidebar(
                   downloadButton("rds", "Baixar resultados (.rds)", class = "btn-sm")),
               tableOutput("tabela")),
     nav_panel("Log", verbatimTextOutput("log"))
-  )
+  ),
+  # telas pequenas (celular, tablet): as barras laterais se recolhem para
+  # sobrar espaco para os graficos. Os controles de cada aba comecam
+  # fechados, e a barra de parametros fecha ao clicar em "Rodar simulacao".
+  # No computador (tela >= 992 px) nada muda. As setas reabrem as barras.
+  tags$script(HTML("
+    function fecharPaineis(incluirPrincipal) {
+      if (window.innerWidth >= 992) return;
+      document.querySelectorAll('.bslib-sidebar-layout > .collapse-toggle').forEach(function(t) {
+        var layout = t.parentElement;
+        var principal = !layout.classList.contains('sidebar-right');
+        var aberta = !layout.classList.contains('sidebar-collapsed');
+        if ((incluirPrincipal || !principal) && aberta) t.click();
+      });
+    }
+    $(document).on('shiny:connected', function() { setTimeout(function() { fecharPaineis(false); }, 300); });
+    $(document).on('click', '#rodar', function() { fecharPaineis(true); });
+  "))
 )
 
 

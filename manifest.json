@@ -2205,8 +2205,11 @@
     }
   },
   "files": {
+    ".RData": {
+      "checksum": "8c01499a839c6494a54d8559e8c074c2"
+    },
     "app.R": {
-      "checksum": "e69378b8a5a0a287aa18005ab2eedd8c"
+      "checksum": "aee980e7e5e9e704a239c939c46b1411"
     },
     "graficos.R": {
       "checksum": "379207760fa13ab97d3c71217be451dd"
