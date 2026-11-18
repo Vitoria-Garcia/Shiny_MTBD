@@ -1097,71 +1097,98 @@ svg_compartimentos <- function(cores = COR_TRAJ, cinza = "#8A8F98") {
     '</svg>')
 }
 
-# Figura 2: epidemia completa x arvore reconstruida (esquema fixo)
-svg_arvores <- function(cor = COR_FENO[1], cinza = "#A3A8B0") {
-  X <- function(t, x0) x0 + 25 + t * 30          # tempo -> pixel
-  Y <- function(y) 250 - y * 24                  # posicao vertical -> pixel
-  lin <- function(x1, y1, x2, y2, c, tracejado = FALSE) sprintf(
-    '<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="2.6" stroke-linecap="round"%s/>',
-    x1, y1, x2, y2, c, if (tracejado) ' stroke-dasharray="5 5"' else "")
-  ramo <- function(x0, t0, t1, y, c = cor, ...) lin(X(t0, x0), Y(y), X(t1, x0), Y(y), c, ...)
-  vert <- function(x0, t, y1, y2, c = cor) lin(X(t, x0), Y(y1), X(t, x0), Y(y2), c)
-  amostra <- function(x0, t, y) sprintf('<circle cx="%.1f" cy="%.1f" r="5.5" fill="%s"/>', X(t, x0), Y(y), cor)
-  removido <- function(x0, t, y) sprintf(
-    '<path d="M%.1f %.1f l9 9 m0 -9 l-9 9" stroke="%s" stroke-width="2.4"/>', X(t, x0) - 4.5, Y(y) - 4.5, cinza)
-  txt <- function(x, y, s, classe = "fig-nota", ancora = "middle") sprintf(
-    '<text x="%.1f" y="%.1f" text-anchor="%s" class="%s">%s</text>', x, y, ancora, classe, s)
-  eixo <- function(x0) paste0(
-    lin(X(0, x0), 266, X(10, x0), 266, "#C4C8CE"),
-    paste0(sapply(c(0, 5, 10), function(t) paste0(
-      lin(X(t, x0), 266, X(t, x0), 271, "#C4C8CE"), txt(X(t, x0), 284, t))), collapse = ""),
-    txt(X(10, x0), 258, "tempo →", ancora = "end"))
-  
-  a <- 10; b <- 410       # inicio dos dois paineis
-  completa <- paste0(
-    txt(X(5, a), 22, "Epidemia completa", "fig-tit"),
-    ramo(a, 0, 3, 4.5), vert(a, 3, 7, 2),
-    ramo(a, 3, 4.5, 7), vert(a, 4.5, 8, 6),
-    ramo(a, 4.5, 7, 8), amostra(a, 7, 8),
-    ramo(a, 4.5, 6, 6), vert(a, 6, 6, 5.5), vert(a, 6, 6, 6.5, cinza),
-    ramo(a, 6, 7, 6.5, cinza, TRUE), removido(a, 7, 6.5),
-    ramo(a, 6, 8.5, 5.5), amostra(a, 8.5, 5.5),
-    ramo(a, 3, 4, 2), vert(a, 4, 2, 1), vert(a, 4, 2, 3, cinza),
-    ramo(a, 4, 5.5, 3, cinza, TRUE), removido(a, 5.5, 3),
-    ramo(a, 4, 6, 1), vert(a, 6, 1.5, 0.5),
-    ramo(a, 6, 8, 1.5), amostra(a, 8, 1.5),
-    ramo(a, 6, 9.5, 0.5), amostra(a, 9.5, 0.5),
-    txt(X(0, a), Y(4.5) + 18, "origem", ancora = "start"),
-    eixo(a))
-  reconstruida <- paste0(
-    txt(X(5, b), 22, "Árvore reconstruída", "fig-tit"),
-    ramo(b, 0, 3, 4.5), vert(b, 3, 7, 2),
-    txt(X(1.4, b), Y(4.5) - 8, "ramo-tronco"),
-    txt(X(3, b) - 6, Y(4.5) + 18, "MRCA (raiz)", ancora = "end"),
-    ramo(b, 3, 4.5, 7), vert(b, 4.5, 8, 6),
-    txt(X(4.5, b) + 7, Y(7) + 4, "nó = transmissão", ancora = "start"),
-    ramo(b, 4.5, 7, 8), amostra(b, 7, 8),
-    ramo(b, 4.5, 8.5, 6), amostra(b, 8.5, 6),
-    ramo(b, 3, 6, 2), vert(b, 6, 3, 1),
-    ramo(b, 6, 8, 3), amostra(b, 8, 3),
-    ramo(b, 6, 9.5, 1), amostra(b, 9.5, 1),
-    txt(X(9.5, b), Y(1) - 11, "ponta"),
-    eixo(b))
-  poda <- paste0(
-    sprintf('<line x1="338" y1="150" x2="408" y2="150" stroke="#6B7280" stroke-width="2.2" marker-end="url(#seta-a)"/>'),
-    txt(373, 140, "poda"))
-  legenda <- paste0(
-    sprintf('<circle cx="150" cy="306" r="5.5" fill="%s"/>', cor),
-    txt(162, 310, "infectado amostrado (vira ponta)", ancora = "start"),
-    sprintf('<path d="M425.5 301.5 l9 9 m0 -9 l-9 9" stroke="%s" stroke-width="2.4"/>', cinza),
-    txt(442, 310, "removido sem amostra (ramo some)", ancora = "start"))
+# Figura 2: exemplo de arvore filogenetica com amostragem ao longo do tempo.
+# Arvore "em pe": origem em cima, presente embaixo. Cada simbolo e um tipo
+# de evento do modelo; a lista ao lado (legenda_arvore) explica cada um.
+COR_EVENTO <- c(origem = "#1F2937", transmissao = "#4472C4", morte = "#E0352B",
+                passado = "#F28C28", presente = "#7B3294", nao_amostrado = "#6AAE5A")
+
+# desenha o simbolo de um evento centrado em (x, y); o triangulo fica com a
+# base em y (apoiado na linha do presente)
+simbolo <- function(tipo, x, y, r = 6) {
+  cor <- COR_EVENTO[[tipo]]
+  switch(tipo,
+         origem = , transmissao = , nao_amostrado =
+           sprintf('<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s"/>', x, y, r, cor),
+         morte = sprintf(paste0('<path d="M%.1f %.1f l%.1f %.1f m0 %.1f l%.1f %.1f" stroke="%s" ',
+                                'stroke-width="2.6" stroke-linecap="round" fill="none"/>'),
+                         x - r, y - r, 2 * r, 2 * r, -2 * r, -2 * r, 2 * r, cor),
+         passado = sprintf('<path d="M%.1f %.1f l%.1f %.1f l%.1f %.1f l%.1f %.1f z" fill="%s"/>',
+                           x, y - 1.35 * r, 1.35 * r, 1.35 * r, -1.35 * r, 1.35 * r,
+                           -1.35 * r, -1.35 * r, cor),
+         presente = sprintf('<path d="M%.1f %.1f L%.1f %.1f L%.1f %.1f z" fill="%s"/>',
+                            x, y - 1.9 * r, x + 1.15 * r, y, x - 1.15 * r, y, cor))
+}
+
+# icone de um simbolo, para usar na legenda e no meio do texto
+icone <- function(tipo)
+  HTML(sprintf('<svg class="ic" viewBox="0 0 20 20" aria-hidden="true">%s</svg>',
+               simbolo(tipo, 10, if (tipo == "presente") 16 else 10)))
+
+svg_arvore_exemplo <- function() {
+  P <- 318                                         # altura da linha do presente
+  linha <- function(x1, y1, x2, y2) sprintf(
+    '<line x1="%.0f" y1="%.0f" x2="%.0f" y2="%.0f" stroke="#1F2937" stroke-width="2.4" stroke-linecap="square"/>',
+    x1, y1, x2, y2)
+  v <- function(x, y1, y2) linha(x, y1, x, y2)     # ramo (vertical)
+  h <- function(y, x1, x2) linha(x1, y, x2, y)     # ligacao entre os filhos de um no
+  txt <- function(x, y, s, classe = "fig-nota", ancora = "start") sprintf(
+    '<text x="%.0f" y="%.0f" text-anchor="%s" class="%s">%s</text>', x, y, ancora, classe, s)
   
   paste0(
-    '<svg viewBox="0 0 760 318" xmlns="http://www.w3.org/2000/svg" role="img" ',
-    'aria-label="Epidemia completa e árvore reconstruída">',
-    '<defs><marker id="seta-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" ',
+    '<svg class="arvore" viewBox="0 0 488 348" xmlns="http://www.w3.org/2000/svg" role="img" ',
+    'aria-label="Exemplo de árvore filogenética com amostragem ao longo do tempo">',
+    '<defs><marker id="seta-t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" ',
     'markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7280"/></marker></defs>',
-    completa, poda, reconstruida, legenda, '</svg>')
+    # seta do tempo (esquerda) e linha do presente
+    '<line x1="20" y1="40" x2="20" y2="300" stroke="#6B7280" stroke-width="2" marker-end="url(#seta-t)"/>',
+    '<text transform="translate(13 170) rotate(-90)" text-anchor="middle" class="fig-nota">tempo</text>',
+    '<line x1="40" y1="318" x2="390" y2="318" stroke="#6B7280" stroke-width="1.6" stroke-dasharray="5 4"/>',
+    # ramos
+    v(205, 34, 78), h(78, 110, 300),                        # origem -> raiz (MRCA)
+    v(110, 78, 232), h(232, 75, 145), v(75, 232, P), v(145, 232, P),
+    v(300, 78, 150), h(150, 250, 355),
+    v(355, 150, 258),                                        # termina amostrado no passado
+    v(250, 150, 188), h(188, 215, 290),
+    v(215, 188, 252),                                        # termina sem amostra
+    v(290, 188, 282), h(282, 268, 312), v(268, 282, P), v(312, 282, P),
+    # eventos (desenhados por cima dos ramos)
+    simbolo("origem", 205, 34),
+    simbolo("transmissao", 205, 78),  simbolo("transmissao", 110, 232),
+    simbolo("transmissao", 300, 150), simbolo("transmissao", 250, 188),
+    simbolo("transmissao", 290, 282),
+    simbolo("morte", 215, 252),
+    simbolo("passado", 355, 258),
+    simbolo("nao_amostrado", 75, P),
+    simbolo("presente", 145, P), simbolo("presente", 268, P), simbolo("presente", 312, P),
+    # rotulos
+    txt(217, 34, "Origem", "fig-rot"), txt(217, 50, "t = 0"),
+    txt(196, 70, "MRCA (raiz)", ancora = "end"),
+    txt(398, 322, "Presente", "fig-rot"), txt(398, 338, "t = timestop"),
+    '</svg>')
+}
+
+legenda_arvore <- function() {
+  item <- function(tipo, titulo, texto)
+    tags$li(icone(tipo), tags$div(tags$b(HTML(titulo)), tags$br(), HTML(texto)))
+  tags$ul(class = "simbolos",
+          item("origem", "Origem",
+               "O primeiro infectado da linhagem, em t = 0 (na Linhagem B, em t = <code>timeIntro2</code>)."),
+          item("transmissao", "Nascimento (λ) → transmissão",
+               "Um infectado transmite o patógeno para outra pessoa e o ramo se divide em dois."),
+          item("morte", "Morte (μ) → fim do período infeccioso",
+               "O infectado deixa de transmitir (recupera, é isolado ou morre) <b>sem</b> ser amostrado,
+         com taxa μ · (1 − δ). O ramo termina e não aparece nos dados."),
+          item("passado", "Amostragem no passado (ψ)",
+               "O infectado é removido e o patógeno é sequenciado antes do presente, com taxa
+         ψ = μ · δ. Vira uma ponta da árvore."),
+          item("presente", "Amostragem no presente (ρ)",
+               "No fim da simulação (t = <code>timestop</code>), cada infectado ainda vivo é
+         sequenciado com probabilidade ρ."),
+          item("nao_amostrado", "Não amostrado no presente (1 − ρ)",
+               "Infectado ainda vivo em <code>timestop</code> que não foi sequenciado. Também não
+         aparece nos dados.")
+  )
 }
 
 # Uma linha da tabela de parametros
@@ -1227,25 +1254,31 @@ aba_sobre <- nav_panel(
       
       # ---------------------------------------------------------------
       tags$h4("2. O que é uma árvore filogenética"),
-      p(HTML("Uma árvore filogenética mostra a evolução entre os patógenos amostrados: quem
-      descende de quem e há quanto tempo eles compartilham um ancestral. Aqui, o eixo horizontal
-      das árvores é o tempo.")),
+      p(HTML("Uma árvore filogenética mostra a história de transmissão entre os patógenos: quem
+      descende de quem e há quanto tempo eles compartilham um ancestral. No exemplo abaixo, o tempo
+      corre de cima (origem) para baixo (presente), e cada símbolo marca um tipo de evento do
+      modelo.")),
+      div(class = "figura figura-arvore",
+          div(class = "arvore-flex", HTML(svg_arvore_exemplo()), legenda_arvore()),
+          p(class = "legenda-fig", "Exemplo de árvore filogenética com amostragem ao longo do tempo.")),
+      p(HTML("<b>A árvore que vemos nos dados.</b> Só conhecemos os patógenos que foram sequenciados
+      ("), icone("passado"), " e ", icone("presente"), HTML("). Por isso, a árvore usada na análise
+      (e desenhada na aba <b>Árvores</b>) é a <b>árvore reconstruída</b>: os ramos que terminam em "),
+        icone("morte"), " ou ", icone("nao_amostrado"), HTML(" são podados, e um nó que fica com um só
+      descendente amostrado deixa de ser nó. No exemplo, a árvore reconstruída tem 4 pontas e 3 nós.")),
       tags$ul(
         tags$li(HTML("<b>Pontas (folhas):</b> Cada ponta é um infectado amostrado, no instante da
-        amostragem.")),
+        amostragem (no passado ou no presente).")),
         tags$li(HTML("<b>Nós internos:</b> Cada nó é um evento de transmissão que deu origem a duas
         cadeias com descendentes amostrados.")),
         tags$li(HTML("<b>Ramos:</b> O comprimento de um ramo é o tempo entre dois eventos.")),
         tags$li(HTML("<b>MRCA:</b> o MRCA é o ancestral comum mais recente de todas as
-        amostras de uma linhagem, ou seja, a raiz da árvore."))
+        amostras de uma linhagem, ou seja, a raiz da árvore reconstruída."))
       ),
-      div(class = "figura", HTML(svg_arvores()),
-          p(class = "legenda-fig", "À esquerda, todas as cadeias de transmissão; em cinza, as que
-          terminam sem nenhuma amostra. À direita, a árvore que sobra depois da poda.")),
       p(HTML("O app monta uma árvore separada para cada linhagem, desde que ela tenha pelo menos 2
-      amostras. A forma da árvore guarda a marca da dinâmica da epidemia: quando a transmissão é
-      rápida, muitos nós se concentram em pouco tempo; quando ela diminui, os nós ficam mais
-      espaçados.")),
+      amostras. Na aba <b>Árvores</b>, elas aparecem deitadas, com o tempo no eixo horizontal. A forma
+      da árvore guarda a marca da dinâmica da epidemia: quando a transmissão é rápida, muitos nós se
+      concentram em pouco tempo; quando ela diminui, os nós ficam mais espaçados.")),
       
       # ---------------------------------------------------------------
       tags$h4("3. Parâmetros"),
@@ -1342,6 +1375,21 @@ css_secoes <- "
 .fig-taxa  { font-size: 15px; font-weight: 600; fill: #374151; }
 .fig-nota  { font-size: 12.5px; fill: #6B7280; }
 .fig-tit   { font-size: 15px; font-weight: 700; fill: var(--bs-primary); }
+.fig-rot   { font-size: 13.5px; font-weight: 700; fill: #1F2937; }
+/* figura da arvore: arvore e legenda lado a lado; em tela estreita a legenda
+   desce para baixo da arvore (nao precisa arrastar para o lado) */
+.sobre .figura-arvore .arvore-flex { display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: center; gap: 1rem 2rem; }
+.sobre .figura.figura-arvore svg.arvore { flex: 1 1 340px; width: 100%; max-width: 440px;
+  min-width: 0; }
+.sobre .simbolos { flex: 1 1 260px; max-width: 400px; list-style: none; padding: 0; margin: 0;
+  text-align: left; font-size: .88rem; line-height: 1.4; }
+.sobre .simbolos li { display: flex; gap: .65rem; align-items: flex-start; margin-bottom: .75rem; }
+.sobre svg.ic { width: 1em !important; height: 1em !important; min-width: 0 !important;
+  max-width: none !important; vertical-align: -.15em; }
+.sobre .simbolos svg.ic { flex: 0 0 auto; width: 18px !important; height: 18px !important;
+  margin-top: .1rem; }
+.sobre .figura.figura-arvore .legenda-fig::before { content: none; }
 .irs, .selectize-input, .selectize-dropdown, .shiny-notification,
 .form-control, .btn, table {
   font-family: inherit;                         /* tudo na fonte do tema */
@@ -1354,13 +1402,41 @@ css_secoes <- "
   border-bottom: none !important;
   font-size: 1.2rem !important;                 /* titulo longo: cabe numa linha */
 }
-.bslib-page-sidebar > .navbar .navbar-brand { color: #fff !important; }
+.bslib-page-sidebar > .navbar .navbar-brand { color: #fff !important; font-size: 1.2rem !important; }
+
+/* titulo longo quebra linha em qualquer versao do bslib. Nas versoes novas
+   o titulo e um 'navbar-brand' do Bootstrap, que por padrao NUNCA quebra
+   linha: o titulo ficava mais largo que a janela e empurrava a pagina toda
+   para o lado (barra lateral cortada, faixa azul terminando antes da borda) */
+.bslib-page-title,
+.bslib-page-sidebar > .navbar .navbar-brand {
+  white-space: normal !important;
+  min-width: 0;
+  max-width: 100%;
+}
+.bslib-page-sidebar > .navbar .container-fluid { min-width: 0; }
+
+/* janelas estreitas (computador com janela pequena, tablet): a tabela de
+   parametros da aba Sobre quebra linha em vez de sair do cartao */
+@media (max-width: 991.98px) {
+  .sobre table td:first-child { white-space: normal; }
+  .sobre table code { word-break: break-word; }
+}
+
+/* aviso que aparece so quando o app esta encolhido num celular */
+#aviso-celular { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 3000;
+  background: #FFF3CD; color: #5C4400; padding: .7em 2.6em .7em 1em; line-height: 1.35;
+  box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+#aviso-celular a { color: var(--bs-primary); font-weight: 700; }
+#aviso-celular .fechar { position: absolute; right: .6em; top: .35em; font-size: 1.4em;
+  cursor: pointer; background: none; border: 0; color: #5C4400; }
 
 /* celular: a aba Sobre ocupa so a largura da tela */
 .sobre { width: 100%; min-width: 0; }
 #tabela, #log { width: 100%; min-width: 0; overflow-x: auto; }   /* Resumo e Log rolam para o lado */
 @media (max-width: 575.98px) {
-  .bslib-page-title { font-size: 1rem !important; line-height: 1.3; }
+  .bslib-page-title,
+  .bslib-page-sidebar > .navbar .navbar-brand { font-size: 1rem !important; line-height: 1.3; }
   .sobre { padding: 0 .25rem 1.5rem; }
   .sobre .figura { overflow-x: auto; }                 /* figura: arrasta para o lado */
   .sobre .figura svg { min-width: 620px; }
@@ -1413,7 +1489,32 @@ ui <- page_sidebar(
   # sobrar espaco para os graficos. Os controles de cada aba comecam
   # fechados, e a barra de parametros fecha ao clicar em "Rodar simulacao".
   # No computador (tela >= 992 px) nada muda. As setas reabrem as barras.
+  div(id = "aviso-celular"),
   tags$script(HTML("
+    // Celular mostrando o app 'encolhido': dentro de outra pagina (ex.: painel
+    // do Connect Cloud) ou com o navegador em 'Site para computador'.
+    // Nesses casos aparece um aviso no topo explicando o que fazer.
+    $(function() {
+      var menorLado = Math.min(screen.width, screen.height);
+      if (menorLado >= 600) return;                          // nao e celular
+      var paisagem = (typeof window.orientation === 'number' && Math.abs(window.orientation) === 90) ||
+                     screen.width > screen.height;
+      var larguraTela = paisagem ? Math.max(screen.width, screen.height) : menorLado;
+      var fator = window.innerWidth / larguraTela;           // quanto a pagina foi encolhida
+      var emOutraPagina = window.self !== window.top;
+      if (!emOutraPagina && fator < 1.5) return;             // tudo certo
+      var msg = emOutraPagina
+        ? 'O app está aberto dentro de outra página e fica pequeno no celular. ' +
+          '<a href=\"' + location.href + '\" target=\"_blank\" rel=\"noopener\">Toque aqui para abrir em tela cheia</a>.'
+        : 'Seu navegador está mostrando a versão para computador, por isso o app fica pequeno. ' +
+          'No Chrome, toque em ⋮ e desmarque <b>Site para computador</b>.';
+      var aviso = document.getElementById('aviso-celular');
+      aviso.innerHTML = msg + '<button class=\"fechar\" aria-label=\"Fechar\">×</button>';
+      aviso.style.fontSize = Math.round(15 * Math.max(fator, 1)) + 'px';
+      aviso.style.display = 'block';
+      aviso.querySelector('.fechar').onclick = function() { aviso.style.display = 'none'; };
+    });
+
     function fecharPaineis(incluirPrincipal) {
       if (window.innerWidth >= 992) return;
       document.querySelectorAll('.bslib-sidebar-layout > .collapse-toggle').forEach(function(t) {
