@@ -492,6 +492,10 @@ MTBD.SIR.SIRS <- function(n, lambdasky_1, lambdasky_2, deathsky_1, deathsky_2,
 #   - callback ao_progredir(r, re) para a barra de progresso do Shiny
 #   - teto de infectados vivos (max_infectados): a replicata que atinge o
 #     teto e truncada naquele instante ou, com descartar_teto = TRUE, descartada
+#   - com_semB = TRUE: PARES. Cada replicata r roda duas vezes com a mesma
+#     semente (seed + r): "A com B" (B entra em timeIntro2) e "A sem B" (B
+#     nunca entra). Os dois sao identicos ate timeIntro2; a diferenca depois,
+#     dentro do par, e o efeito de B. "A sem B" fica em resultados_semB.
 # Continua funcionando fora do Shiny, igual a versao original.
 # =====================================================================
 
@@ -515,11 +519,17 @@ mc_MTBD_SIR_SIRS <- function(re = 40, model = c("SIR", "SIRS", "BD"),
                              max_infectados = Inf,
                              descartar_teto = FALSE,
                              limite_seg = Inf,
+                             com_semB = FALSE,
                              ao_progredir = NULL) {
   
   model <- match.arg(model)
   if (re < 1) stop("re deve ser >= 1")
-  if (!is.null(seed) && !is.na(seed)) set.seed(seed)
+  tem_seed <- !is.null(seed) && length(seed) == 1 && !is.na(seed)
+  if (tem_seed) set.seed(seed)
+  # pares: cada replicata usa a semente seed + r nos dois cenarios
+  seed_base <- if (tem_seed) seed else sample.int(1e6, 1)
+  # "A sem B": B nunca entra (como no seu script: timestop + 1)
+  intro_semB <- if (timestop > 0) timestop + 1 else Inf
   if (is.null(omegasky)) omegasky <- rep(0, length(timesky))
   if (model == "BD" && missing(N)) N <- 0
   
@@ -527,14 +537,14 @@ mc_MTBD_SIR_SIRS <- function(re = 40, model = c("SIR", "SIRS", "BD"),
   tempos     <- numeric(re)
   status     <- character(re)
   logs       <- vector("list", re)
+  resultados_semB <- if (com_semB) vector("list", re) else NULL
+  status_semB     <- if (com_semB) character(re) else NULL
   
-  tInicial <- Sys.time()
-  
-  for (r in seq_len(re)) {
+  # roda UMA simulacao e classifica o que aconteceu
+  roda_uma <- function(intro) {
     saida <- NULL
     log   <- character()
     erro  <- NULL
-    
     t0 <- proc.time()[["elapsed"]]
     tryCatch({
       # capture.output guarda os print() do simulador (ex.: "extinct tree
@@ -548,7 +558,7 @@ mc_MTBD_SIR_SIRS <- function(re = 40, model = c("SIR", "SIRS", "BD"),
             timesky     = timesky,     sampprobsky = sampprobsky,
             rho         = rho,         timestop    = timestop,
             model       = model,       N           = N,
-            omegasky    = omegasky,    timeIntro2  = timeIntro2,
+            omegasky    = omegasky,    timeIntro2  = intro,
             trackinfecteds   = TRUE,
             aceitar_extincao = aceitar_extincao,
             max_infectados   = max_infectados
@@ -557,12 +567,11 @@ mc_MTBD_SIR_SIRS <- function(re = 40, model = c("SIR", "SIRS", "BD"),
         )
       )
     }, error = function(e) erro <<- conditionMessage(e))
-    tempos[r] <- proc.time()[["elapsed"]] - t0
+    tempo <- proc.time()[["elapsed"]] - t0
     
-    # classifica o que aconteceu nesta replicata
     teto <- is.list(saida) && isTRUE(saida[[2]]$parou_teto)
-    status[r] <-
-      if (!is.null(erro) && is.finite(limite_seg) && tempos[r] >= limite_seg * 0.98) {
+    st <-
+      if (!is.null(erro) && is.finite(limite_seg) && tempo >= limite_seg * 0.98) {
         "tempo esgotado"
       } else if (!is.null(erro)) {
         paste("erro:", erro)
@@ -579,14 +588,34 @@ mc_MTBD_SIR_SIRS <- function(re = 40, model = c("SIR", "SIRS", "BD"),
       } else {
         "parametros invalidos"
       }
+    list(saida = if (is.list(saida) && !(teto && descartar_teto)) saida else NULL,
+         status = st, log = log, tempo = tempo)
+  }
+  
+  tInicial <- Sys.time()
+  
+  for (r in seq_len(re)) {
+    if (com_semB) set.seed(seed_base + r)
+    comB <- roda_uma(timeIntro2)
     
     # resultados[r] <- list(...) (e nao [[r]] <- NULL, que APAGA o elemento e
     # encurta a lista quando as ultimas replicatas falham)
-    resultados[r] <- list(if (is.list(saida) && !(teto && descartar_teto)) saida else NULL)
-    logs[[r]]       <- log
+    resultados[r] <- list(comB$saida)
+    status[r]     <- comB$status
+    logs[[r]]     <- comB$log
+    tempos[r]     <- comB$tempo
+    
+    if (com_semB) {
+      set.seed(seed_base + r)                  # mesma semente: identico ate timeIntro2
+      semB <- roda_uma(intro_semB)
+      resultados_semB[r] <- list(semB$saida)
+      status_semB[r]     <- semB$status
+      tempos[r]          <- tempos[r] + semB$tempo
+    }
     
     if (verbose)
-      cat(sprintf("[%s] rep %2d/%-2d  %5.2fs  %s\n", model, r, re, tempos[r], status[r]))
+      cat(sprintf("[%s] rep %2d/%-2d  %5.2fs  %s%s\n", model, r, re, tempos[r], status[r],
+                  if (com_semB) paste0("  | sem B: ", status_semB[r]) else ""))
     if (is.function(ao_progredir)) ao_progredir(r, re)
   }
   
@@ -609,6 +638,9 @@ mc_MTBD_SIR_SIRS <- function(re = 40, model = c("SIR", "SIRS", "BD"),
     resultados    = resultados,
     status        = status,
     logs          = logs,
+    resultados_semB = resultados_semB,   # NULL se com_semB = FALSE
+    status_semB   = status_semB,
+    seeds         = if (com_semB) seed_base + seq_len(re) else NULL,
     parametros    = list(n = n, N = N, rho = rho, timestop = timestop,
                          timeIntro2 = timeIntro2, timesky = timesky,
                          lambdasky_1 = lambdasky_1, lambdasky_2 = lambdasky_2,
@@ -616,7 +648,8 @@ mc_MTBD_SIR_SIRS <- function(re = 40, model = c("SIR", "SIRS", "BD"),
                          sampprobsky = sampprobsky, omegasky = omegasky,
                          aceitar_extincao = aceitar_extincao,
                          max_infectados = max_infectados,
-                         descartar_teto = descartar_teto, seed = seed)
+                         descartar_teto = descartar_teto, seed = seed,
+                         com_semB = com_semB)
   ))
 }
 
@@ -805,6 +838,274 @@ plot_arvores_rep <- function(mp, cores = COR_FENO, xmax, intro2 = NA,
   invisible()
 }
 
+# ---- ramos: comprimento de ramo x tempo e x suscetiveis -----------------
+# Funcoes do seu script de ramos (tempo_mrca, tempo_nos, tabela_ramos) e a
+# analise do script de pares (por_janela, S_medio, ramos_S, descritivas),
+# em R base para o app nao depender do dplyr/tidyr/ggplot2.
+# Grupos, como no seu script:
+#   "A"       = Linhagem A no cenario SEM B (controle)
+#   "A com B" = Linhagem A no cenario com B
+#   "B"       = Linhagem B
+COR_RAMOS   <- c("A" = "#935999", "A com B" = "#073A70", "B" = "#9C383D")   # cores do seu script
+ROTULO_TIPO <- c(interno = "Interno", terminal = "Terminal")
+
+# Tempo absoluto do MRCA das amostras de uma linhagem:
+# root.time (introducao da linhagem) + root.edge (ramo ate o MRCA)
+tempo_mrca <- function(phy) {
+  if (is.null(phy$root.edge))
+    stop("arvore sem root.edge: nao da para ancorar o tempo absoluto")
+  root_time <- if (is.null(phy$root.time)) 0 else phy$root.time
+  root_time + phy$root.edge
+}
+
+# Tempo absoluto de todos os nos (pontas 1..Ntip, depois internos).
+# node.depth.edgelength() mede a distancia a partir do MRCA (ignora root.edge).
+tempo_nos <- function(phy) tempo_mrca(phy) + ape::node.depth.edgelength(phy)
+
+# Uma linha por RAMO (sem o tronco). Cada linha de phy$edge e um ramo
+# (pai -> filho): o ramo ASCENDENTE do filho e um dos DESCENDENTES do pai.
+# Comprimento = t(filho) - t(pai).
+tabela_ramos <- function(phy, linhagem = NA) {
+  nFolhas <- ape::Ntip(phy)
+  tempoNo <- tempo_nos(phy)
+  pai     <- phy$edge[, 1]
+  filho   <- phy$edge[, 2]
+  result <- data.frame(
+    linhagem    = linhagem,
+    pai         = pai,
+    filho       = filho,
+    comprimento = phy$edge.length,
+    t_inicio    = tempoNo[pai],      # tempo do no pai (mais antigo)
+    t_fim       = tempoNo[filho],    # tempo do no filho (mais recente)
+    tipo        = ifelse(filho <= nFolhas, "terminal", "interno")
+  )
+  stopifnot(isTRUE(all.equal(result$t_fim - result$t_inicio, result$comprimento)))
+  result
+}
+
+# Media de S durante a vida de cada ramo (de t0 a t1): integral de S / duracao
+S_medio <- function(din, t0, t1) {
+  tt <- din$eventtimes
+  S  <- din$susceptibles
+  acum <- c(0, cumsum(S[-length(S)] * diff(tt)))      # integral de S ate cada evento
+  integral <- function(x) {
+    i <- pmax(findInterval(x, tt), 1)
+    acum[i] + S[i] * (x - tt[i])
+  }
+  (integral(t1) - integral(t0)) / (t1 - t0)
+}
+
+# A ainda tem infectados vivos no instante t?
+A_viva_em <- function(din, t) {
+  if (t <= 0) return(TRUE)
+  i <- findInterval(t, din$eventtimes)
+  i > 0 && din$n1[i] > 0
+}
+
+# Pares usados na analise, como no seu script: os dois cenarios rodaram, A
+# estava viva quando B entrou e a arvore de B tem pelo menos min_amostras_B
+# pontas. Sem o cenario "A sem B" (rodado sem pares), so o filtro de B vale.
+pares_validos <- function(d, t_intro, min_amostras_B = 20) {
+  res  <- d$resultados
+  semB <- d$resultados_semB
+  n_B  <- function(x) if ("tipo2" %in% names(x[[1]])) ape::Ntip(x[[1]]$tipo2) else 0L
+  which(vapply(seq_along(res), function(r) {
+    x <- res[[r]]
+    y <- if (!is.null(semB) && r <= length(semB)) semB[[r]] else NULL
+    if (!is.list(x) || (!is.null(semB) && !is.list(y))) return(FALSE)
+    A_viva_em((if (is.list(y)) y else x)[[2]], t_intro) && n_B(x) >= min_amostras_B
+  }, logical(1)))
+}
+
+# Ramos de todos os pares (coluna 'par' = numero da replicata) com o S medio
+# de cada ramo. Ramos de "A" usam os suscetiveis do cenario sem B; ramos de
+# "A com B" e de "B", os do cenario com B. No BD (sem S), S fica NA.
+extrai_ramos_pares <- function(d, idx) {
+  partes <- list()
+  for (r in idx) {
+    x <- d$resultados[[r]]
+    y <- if (!is.null(d$resultados_semB)) d$resultados_semB[[r]] else NULL
+    arvs <- list()
+    if (is.list(y) && "tipo1" %in% names(y[[1]])) arvs[["A"]]       <- list(y[[1]]$tipo1, y[[2]], "A")
+    if ("tipo1" %in% names(x[[1]]))                arvs[["A com B"]] <- list(x[[1]]$tipo1, x[[2]], "A")
+    if ("tipo2" %in% names(x[[1]]))                arvs[["B"]]       <- list(x[[1]]$tipo2, x[[2]], "B")
+    for (g in names(arvs)) {
+      phy <- arvs[[g]][[1]]; din <- arvs[[g]][[2]]
+      tb <- tabela_ramos(phy, arvs[[g]][[3]])
+      tb$grupo <- g
+      tb$par   <- r
+      tb$S     <- NA_real_
+      if (!is.null(din$susceptibles) && !all(is.na(din$susceptibles))) {
+        ok <- tb$comprimento > 0
+        tb$S[ok] <- S_medio(din, tb$t_inicio[ok], tb$t_fim[ok])
+      }
+      partes[[length(partes) + 1]] <- tb
+    }
+  }
+  if (!length(partes)) return(NULL)
+  do.call(rbind, partes)
+}
+
+# Media do comprimento de ramo por janela de tempo, por par e grupo.
+# A janela de um ramo e definida pelo tempo do no filho (fim do ramo).
+media_por_janela <- function(ramos, dt = 0.5) {
+  if (is.null(ramos) || !nrow(ramos)) return(NULL)
+  r <- ramos[is.finite(ramos$t_fim) & ramos$t_fim >= 0, ]
+  if (!nrow(r)) return(NULL)
+  quebras <- seq(0, (floor(max(r$t_fim) / dt) + 1) * dt, by = dt)
+  r$t <- quebras[cut(r$t_fim, quebras, labels = FALSE, right = FALSE)] + dt / 2
+  r <- r[!is.na(r$t), ]
+  m <- aggregate(comprimento ~ par + grupo + tipo + t, data = r, FUN = mean)
+  names(m)[names(m) == "comprimento"] <- "media"
+  m
+}
+
+# Estatisticas descritivas dos ramos, antes e depois de B entrar
+descritivas_ramos <- function(ramos, t_intro) {
+  if (is.null(ramos) || !nrow(ramos)) return(NULL)
+  ramos$fase <- ifelse(ramos$t_fim < t_intro, "antes de B", "depois de B")
+  q <- function(x, p) stats::quantile(x, p, names = FALSE)
+  out <- do.call(rbind, lapply(split(ramos, list(ramos$grupo, ramos$tipo, ramos$fase), drop = TRUE),
+                               function(g) {
+                                 x <- g$comprimento
+                                 data.frame(Grupo = g$grupo[1], Ramo = ROTULO_TIPO[[g$tipo[1]]], Fase = g$fase[1],
+                                            Ramos = length(x), `Média` = mean(x), DP = stats::sd(x),
+                                            Mediana = stats::median(x), Q10 = q(x, 0.1), Q90 = q(x, 0.9),
+                                            check.names = FALSE)
+                               }))
+  ordem <- order(match(out$Grupo, names(COR_RAMOS)), out$Ramo, out$Fase)
+  out <- out[ordem, ]
+  rownames(out) <- NULL
+  out
+}
+
+# quebra o texto em linhas que cabem em 'largura_in' polegadas (mede na fonte atual)
+quebra_texto <- function(txt, largura_in, cex = 1) {
+  linhas <- character(); atual <- ""
+  for (p in strsplit(txt, " ", fixed = TRUE)[[1]]) {
+    teste <- if (nzchar(atual)) paste(atual, p) else p
+    if (nzchar(atual) && strwidth(teste, units = "inches", cex = cex) > largura_in) {
+      linhas <- c(linhas, atual); atual <- p
+    } else atual <- teste
+  }
+  c(linhas, atual)
+}
+
+# Faixa de cabecalho dos graficos de ramos: titulo, legenda dos grupos e
+# subtitulo (quebra linha sozinho em tela estreita). Monta tambem o layout
+# dos dois paineis (lado a lado ou, com empilhar = TRUE, um embaixo do outro).
+cabecalho_ramos <- function(titulo, subtitulo, cores, empilhar) {
+  larg <- grDevices::dev.size("in")[1]
+  sub  <- quebra_texto(subtitulo, larg - 0.35, cex = 0.8)
+  csi  <- par("csi")
+  h    <- csi * (1.5 + 1.35 + 1.1 * length(sub) + 0.5)
+  if (empilhar) layout(matrix(1:3, 3), heights = c(lcm(h * 2.54), 1, 1))
+  else          layout(matrix(c(1, 1, 2, 3), 2, byrow = TRUE), heights = c(lcm(h * 2.54), 1))
+  par(mar = c(0, 1, 0, 1))
+  plot.new(); plot.window(c(0, 1), c(0, h), xaxs = "i", yaxs = "i")
+  y <- h - csi * 0.9
+  text(0, y, titulo, adj = c(0, 0.5), font = 2, cex = 1.05, col = "grey25")
+  y <- y - csi * 1.35
+  x <- 0
+  for (g in names(cores)) {
+    w <- strwidth("MM")
+    segments(x, y, x + w, y, col = cores[[g]], lwd = 3)
+    text(x + w * 1.25, y, g, adj = c(0, 0.5), font = 2, col = cores[[g]])
+    x <- x + w * 1.25 + strwidth(paste0(g, "     "), font = 2)
+  }
+  for (s in sub) {
+    y <- y - csi * 1.1
+    text(0, y, s, adj = c(0, 0.5), cex = 0.8, col = "grey45")
+  }
+}
+
+# Grafico 1: comprimento medio de ramo x tempo (Interno | Terminal)
+# linhas finas = pares; linha grossa = media entre os pares (como no seu script)
+plot_ramos_tempo <- function(pj, cores = COR_RAMOS, alpha = 0.25, linha_v = NA,
+                             empilhar = FALSE, familia = "") {
+  if (is.null(pj) || !nrow(pj))
+    return(grafico_vazio("Nenhum par válido: diminua o mínimo de amostras de B", familia))
+  cores <- cores[names(cores) %in% pj$grupo]
+  op <- par(family = familia, font.axis = 2, font.lab = 2, font.main = 2)
+  on.exit({ layout(1); par(op) })
+  sub <- paste0("linhas finas: pares · linha grossa: média",
+                if (!is.na(linha_v)) " · tracejado: entrada de B" else "",
+                if ("A" %in% names(cores)) " · A: cenário sem B" else "")
+  cabecalho_ramos("Comprimento médio do ramo vs tempo", sub, cores, empilhar)
+  par(mar = c(4.5, 4.5, 2.4, 1.2))
+  for (tp in names(ROTULO_TIPO)) {
+    d <- pj[pj$tipo == tp, ]
+    if (!nrow(d)) { plot.new(); title(ROTULO_TIPO[[tp]], col.main = "grey30"); next }
+    do.call(plot, c(list(NA, xlim = range(pj$t), ylim = c(0, max(d$media)), bty = "n",
+                         xlab = "Tempo", ylab = "Comprimento médio do ramo"), estilo_eixos))
+    title(ROTULO_TIPO[[tp]], col.main = "grey30", cex.main = 1)
+    if (!is.na(linha_v)) abline(v = linha_v, lty = 2, col = "grey45")
+    for (g in names(cores)) {                           # uma linha por par
+      dk <- d[d$grupo == g, ]
+      cc <- adjustcolor(cores[[g]], alpha.f = alpha)
+      for (s in split(dk, dk$par)) { s <- s[order(s$t), ]; lines(s$t, s$media, col = cc) }
+    }
+    for (g in names(cores)) {                           # media entre os pares
+      dk <- d[d$grupo == g, ]
+      if (!nrow(dk)) next
+      m <- aggregate(media ~ t, data = dk, FUN = mean)
+      lines(m$t, m$media, lwd = 5, col = "white")
+      lines(m$t, m$media, lwd = 2.5, col = cores[[g]])
+    }
+  }
+  invisible()
+}
+
+# Grafico 2: comprimento do ramo x suscetiveis (S medio durante a vida do ramo)
+# linha = media; faixa = quartis 25-75%; pontilhado = equilibrio S = N mu / lambda
+plot_ramos_S <- function(ramos, largura = 10, min_ramos = 20, S_eq = c(A = NA, B = NA),
+                         N = Inf, cores = COR_RAMOS, empilhar = FALSE, familia = "") {
+  r <- if (is.null(ramos)) NULL else ramos[!is.na(ramos$S) & ramos$comprimento > 0, ]
+  if (is.null(r) || !nrow(r))
+    return(grafico_vazio("Sem suscetíveis: o modelo BD não tem S (ou não há pares válidos)", familia))
+  r$faixa <- floor(r$S / largura) * largura + largura / 2
+  q <- function(x, p) stats::quantile(x, p, names = FALSE)
+  res <- do.call(rbind, lapply(split(r, list(r$grupo, r$tipo, r$faixa), drop = TRUE), function(g)
+    if (nrow(g) >= min_ramos)
+      data.frame(grupo = g$grupo[1], tipo = g$tipo[1], faixa = g$faixa[1],
+                 media = mean(g$comprimento), q25 = q(g$comprimento, 0.25),
+                 q75 = q(g$comprimento, 0.75), n_ramos = nrow(g))))
+  if (is.null(res))
+    return(grafico_vazio(sprintf("Nenhuma faixa de S com %d ramos ou mais: diminua o mínimo ou aumente a faixa",
+                                 min_ramos), familia))
+  cores <- cores[names(cores) %in% res$grupo]
+  op <- par(family = familia, font.axis = 2, font.lab = 2, font.main = 2)
+  on.exit({ layout(1); par(op) })
+  eq <- S_eq[is.finite(S_eq) & S_eq >= 0 & S_eq <= N]
+  cabecalho_ramos("Comprimento do ramo vs suscetíveis",
+                  paste0("linha: média · faixa: quartis 25–75%",
+                         if (length(eq)) " · pontilhado: equilíbrio de A e de B" else ""),
+                  cores, empilhar)
+  par(mar = c(4.5, 4.5, 2.6, 1.2))
+  xlim <- range(c(res$faixa - largura / 2, res$faixa + largura / 2, eq))
+  cor_eq <- c(A = COR_RAMOS[["A"]], B = COR_RAMOS[["B"]])
+  for (tp in names(ROTULO_TIPO)) {
+    d <- res[res$tipo == tp, ]
+    if (!nrow(d)) { plot.new(); title(ROTULO_TIPO[[tp]], col.main = "grey30"); next }
+    do.call(plot, c(list(NA, xlim = xlim, ylim = range(c(d$q25, d$q75, d$media)), bty = "n",
+                         xlab = "Suscetíveis", ylab = "Comprimento médio do ramo"), estilo_eixos))
+    title(ROTULO_TIPO[[tp]], col.main = "grey30", cex.main = 1, line = 1.4)
+    for (k in names(eq)) {
+      abline(v = eq[[k]], lty = 3, lwd = 1.6, col = cor_eq[[k]])
+      mtext(k, side = 3, at = eq[[k]], line = 0.1, cex = 0.75, font = 2, col = cor_eq[[k]])
+    }
+    for (g in names(cores)) {
+      dk <- d[d$grupo == g, ]
+      if (!nrow(dk)) next
+      dk <- dk[order(dk$faixa), ]
+      polygon(c(dk$faixa, rev(dk$faixa)), c(dk$q25, rev(dk$q75)),
+              col = adjustcolor(cores[[g]], alpha.f = 0.15), border = NA)
+      lines(dk$faixa, dk$media, lwd = 2.2, col = cores[[g]])
+    }
+  }
+  invisible()
+}
+
 # ---- tabela-resumo ----------------------------------------------------
 
 tabela_resumo <- function(dados) {
@@ -817,6 +1118,8 @@ tabela_resumo <- function(dados) {
     x <- if (r <= length(res)) res[[r]] else NULL
     base <- data.frame(Replicata = r, Status = st[r],
                        `Tempo (s)` = round(tempos[r], 2), check.names = FALSE)
+    if (!is.null(dados$status_semB))                 # pares: status do cenario sem B
+      base <- data.frame(base[1:2], `Sem B` = dados$status_semB[r], base[3], check.names = FALSE)
     if (!is.list(x)) {
       return(data.frame(base, `t final` = NA_real_,
                         `Amostras L1` = NA_integer_, `Amostras L2` = NA_integer_,
@@ -909,6 +1212,7 @@ monta_parametros <- function(input) {
     max_infectados = if (modelo == "BD" && !is.na(input$max_inf) && input$max_inf > 0)
       input$max_inf else Inf,
     descartar_teto = modelo == "BD" && isTRUE(input$descartar_teto),
+    com_semB    = isTRUE(input$com_semB),
     limite_seg  = if (is.na(input$limite) || input$limite <= 0) Inf else input$limite
   )
   
@@ -1022,7 +1326,11 @@ barra_lateral <- sidebar(
       "População e introdução",
       conditionalPanel("input.model != 'BD'",
                        numericInput("N", "N (tamanho da população)", 500, min = 2, step = 1)),
-      numericInput("timeIntro2", "Introdução da Linhagem B (tempo)", 5, min = 0)
+      numericInput("timeIntro2", "Introdução da Linhagem B (tempo)", 5, min = 0),
+      checkboxInput("com_semB", "Simular também o cenário sem a Linhagem B (pares)", TRUE),
+      ajuda("Cada replicata roda de novo, com a mesma semente, sem a Linhagem B. Até a entrada de B ",
+            "os dois cenários são idênticos; a diferença depois é o efeito de B (aba Ramos). ",
+            "Dobra o tempo de simulação.")
     ),
     accordion_panel(
       "Taxas",
@@ -1203,7 +1511,7 @@ aba_sobre <- nav_panel(
       
       tags$h3("Sobre o modelo"),
       p(HTML("Este app simula uma epidemia em que <b>duas linhagens</b> (por exemplo, duas variantes
-      de um vírus) circulam ao mesmo tempo. Cada simulação produz a <b>trajetória</b> do número de
+      de um vírus) circulam simultaneamente em uma mesma população. Cada simulação produz a <b>trajetória</b> do número de
       infectados ao longo do tempo e a
       <b>árvore filogenética</b> das amostras de cada linhagem.")),
       
@@ -1215,14 +1523,13 @@ aba_sobre <- nav_panel(
       
       # ---------------------------------------------------------------
       tags$h4("1. O modelo epidemiológico"),
-      p(HTML("Os eventos acontecem um de cada
-      vez, em instantes sorteados ao acaso (simulação estocástica em tempo contínuo).
+      p(HTML("Realizamos uma simulação estocástica em tempo contínuo.
       Há três tipos de evento:")),
       tags$ul(
         tags$li(HTML("<b>Transmissão.</b> Um infectado da linhagem <i>i</i> infecta um suscetível,
         com taxa <b>λ<sub><i>i</i></sub></b> por infectado (no Birth-Death puro, com taxa λ<sub><i>i</i></sub>
         constante). Na árvore, isso vira um nó: a linhagem se divide em duas.")),
-        tags$li(HTML("<b>Remoção.</b> O infectado deixa de transmitir (recupera, é isolado ou morre),
+        tags$li(HTML("<b>Remoção.</b> O infectado deixa de transmitir (o indivíduo é curado e ganha imunidade),
         com taxa <b>μ<sub><i>i</i></sub></b>. Em cada remoção, com probabilidade <b>δ</b>, o
         patógeno dessa pessoa é amostrado (sequenciado) e vira uma ponta da árvore. Assim, a taxa
         de amostragem é ψ = μ · δ e a de remoção sem amostra é μ · (1 − δ). Ser amostrado também
@@ -1237,7 +1544,7 @@ aba_sobre <- nav_panel(
       
       p(HTML("<b>Os três modelos</b>")),
       tags$ul(
-        tags$li(HTML("<b>SIR:</b> população fixa de N pessoas. Cada transmissão gasta um suscetível;
+        tags$li(HTML("<b>SIR:</b> população fixa de N pessoas. Cada transmissão reduz um suscetível;
         quando eles ficam escassos, a transmissão cai e a epidemia termina. Os recuperados ficam
         imunes para sempre.")),
         tags$li(HTML("<b>SIRS:</b> como o SIR, mas a imunidade dura em média 1/ω. Os recuperados
@@ -1260,23 +1567,22 @@ aba_sobre <- nav_panel(
       modelo.")),
       div(class = "figura figura-arvore",
           div(class = "arvore-flex", HTML(svg_arvore_exemplo()), legenda_arvore()),
-          p(class = "legenda-fig", "Exemplo de árvore filogenética com amostragem ao longo do tempo.")),
+          p(class = "legenda-fig", "Exemplo de árvore filogenética gerada por nascimento e morte com amostragem ao longo do tempo.")),
       p(HTML("<b>A árvore que vemos nos dados.</b> Só conhecemos os patógenos que foram sequenciados
       ("), icone("passado"), " e ", icone("presente"), HTML("). Por isso, a árvore usada na análise
       (e desenhada na aba <b>Árvores</b>) é a <b>árvore reconstruída</b>: os ramos que terminam em "),
         icone("morte"), " ou ", icone("nao_amostrado"), HTML(" são podados, e um nó que fica com um só
       descendente amostrado deixa de ser nó. No exemplo, a árvore reconstruída tem 4 pontas e 3 nós.")),
       tags$ul(
-        tags$li(HTML("<b>Pontas (folhas):</b> Cada ponta é um infectado amostrado, no instante da
+        tags$li(HTML("<b>Pontas (folhas):</b> Cada nó externo é um infectado amostrado, no instante da
         amostragem (no passado ou no presente).")),
-        tags$li(HTML("<b>Nós internos:</b> Cada nó é um evento de transmissão que deu origem a duas
-        cadeias com descendentes amostrados.")),
+        tags$li(HTML("<b>Nós internos:</b> Cada nó é um evento de transmissão que deu origem a duas linhagens com descendentes.")),
         tags$li(HTML("<b>Ramos:</b> O comprimento de um ramo é o tempo entre dois eventos.")),
         tags$li(HTML("<b>MRCA:</b> o MRCA é o ancestral comum mais recente de todas as
         amostras de uma linhagem, ou seja, a raiz da árvore reconstruída."))
       ),
       p(HTML("O app monta uma árvore separada para cada linhagem, desde que ela tenha pelo menos 2
-      amostras. Na aba <b>Árvores</b>, elas aparecem deitadas, com o tempo no eixo horizontal. A forma
+      amostras. Na aba <b>Árvores</b>, elas aparecem com o tempo no eixo horizontal. A forma
       da árvore guarda a marca da dinâmica da epidemia: quando a transmissão é rápida, muitos nós se
       concentram em pouco tempo; quando ela diminui, os nós ficam mais espaçados.")),
       
@@ -1297,6 +1603,15 @@ aba_sobre <- nav_panel(
                    linha_par("Descartar no teto <small>(BD)</small>", "descartar_teto", "Marcado: a replicata
           que atinge o teto é descartada. Desmarcado: ela é mantida até o instante em que parou."),
                    
+                   
+                   grupo_par("Parada"),
+                   linha_par("timestop", "timestop", "Instante em que a simulação termina: é o
+          presente da árvore. Com timestop &gt; 0, n é ignorado."),
+                   linha_par("n (amostras)", "n", "Outra forma de parar: a simulação termina quando
+          junta n amostras. Só vale com timestop = 0."),
+                   linha_par("ρ (amostragem final)", "rho", "Probabilidade de cada infectado ainda vivo
+          em timestop ser amostrado (amostragem no presente). Exige timestop &gt; 0. Com ρ = 0, só
+          há amostras ao longo do tempo, nas remoções."),
                    
                    grupo_par("População e introdução"),
                    linha_par("N", "N", "Tamanho da população (SIR e SIRS). No início, todos são suscetíveis,
@@ -1323,9 +1638,12 @@ aba_sobre <- nav_panel(
         por suscetíveis, recuperados ou amostras acumuladas e mostrar a mediana.")),
         tags$li(HTML("<b>Árvores:</b> As árvores reconstruídas de uma replicata, no eixo de tempo
         absoluto.")),
+        tags$li(HTML("<b>Ramos:</b> Compara os ramos da Linhagem A sem B (grupo A), da Linhagem A
+        com B e da Linhagem B, em pares com a mesma semente: comprimento médio dos ramos ao longo do
+        tempo, comprimento dos ramos em função dos suscetíveis (com o equilíbrio S = N·μ/λ de cada
+        linhagem) e estatísticas descritivas antes e depois da entrada de B.")),
         tags$li(HTML("<b>Resumo:</b> Uma linha por replicata, com status, número de amostras, pico de
         infectados e tamanho das árvores.")),
-        tags$li(HTML("<b>Log:</b> as mensagens do simulador em cada replicata."))
       )
   )
 )
@@ -1433,7 +1751,9 @@ css_secoes <- "
 
 /* celular: a aba Sobre ocupa so a largura da tela */
 .sobre { width: 100%; min-width: 0; }
-#tabela, #log { width: 100%; min-width: 0; overflow-x: auto; }   /* Resumo e Log rolam para o lado */
+#tabela, #tab_descritivas { width: 100%; min-width: 0; overflow-x: auto; }   /* tabelas rolam para o lado */
+#tab_descritivas td, #tab_descritivas th { white-space: nowrap; }
+#tab_descritivas table { font-size: .84rem; }
 @media (max-width: 575.98px) {
   .bslib-page-title,
   .bslib-page-sidebar > .navbar .navbar-brand { font-size: 1rem !important; line-height: 1.3; }
@@ -1478,12 +1798,38 @@ ui <- page_sidebar(
           downloadButton("nexus", "Todas as árvores (.nex)", class = "btn-sm w-100")
         ),
         plotOutput("g_arvores", height = "680px")),
+    aba("Ramos",
+        tagList(
+          numericInput("min_amostras_B", "Mín. de amostras de B por par", 20, min = 0, step = 1),
+          ajuda("Entram os pares em que A estava viva quando B entrou e a árvore de B tem ",
+                "pelo menos esse número de amostras."),
+          numericInput("dt_ramos", "Largura da janela de tempo", 0.5, min = 0.05, step = 0.1),
+          ajuda("Cada ramo entra na janela do instante em que termina; o gráfico mostra a média ",
+                "de cada janela."),
+          sliderInput("alpha_ramos", "Opacidade dos pares", 0.05, 1, 0.25, step = 0.05),
+          hr(class = "my-2"),
+          numericInput("faixa_S", "Largura da faixa de S", 10, min = 1, step = 5),
+          numericInput("min_ramos", "Mín. de ramos por faixa", 20, min = 1, step = 1),
+          ajuda("S de cada ramo = média dos suscetíveis durante a vida do ramo. Os ramos são ",
+                "agrupados em faixas de S desse tamanho; faixas com menos ramos que o mínimo ",
+                "ficam de fora."),
+          downloadButton("pdf_ramo_tempo", "PDF · ramo x tempo", class = "btn-sm w-100 mb-2"),
+          downloadButton("pdf_ramo_S", "PDF · ramo x suscetíveis", class = "btn-sm w-100")
+        ),
+        tagList(
+          uiOutput("info_pares"),
+          plotOutput("g_ramo_tempo", height = "auto"),
+          hr(),
+          plotOutput("g_ramo_S", height = "auto"),
+          hr(),
+          tags$h6(class = "fw-bold", "Estatísticas descritivas dos ramos"),
+          tableOutput("tab_descritivas")
+        )),
     nav_panel("Resumo",
               uiOutput("caixas"),
               div(class = "d-flex justify-content-end mb-2",
                   downloadButton("rds", "Baixar resultados (.rds)", class = "btn-sm")),
-              tableOutput("tabela")),
-    nav_panel("Log", verbatimTextOutput("log"))
+              tableOutput("tabela"))
   ),
   # telas pequenas (celular, tablet): as barras laterais se recolhem para
   # sobrar espaco para os graficos. Os controles de cada aba comecam
@@ -1596,6 +1942,31 @@ server <- function(input, output, session) {
   intro2  <- reactive(tempo_intro2(trajs()))
   xmax    <- reactive(tempo_maximo(trajs(), info()))
   
+  # ---- ramos (pares "A" sem B x "A com B" x "B") ----
+  t_intro <- reactive({                       # entrada de B: parametro ou, sem ele, os dados
+    t <- pronto()$parametros$timeIntro2 %||% intro2()
+    if (is.na(t)) 0 else t
+  })
+  idx_pares <- reactive({
+    validate(need(is.numeric(input$min_amostras_B) && !is.na(input$min_amostras_B),
+                  "Preencha o mínimo de amostras de B."))
+    pares_validos(pronto(), t_intro(), input$min_amostras_B)
+  })
+  ramos   <- reactive(extrai_ramos_pares(pronto(), idx_pares()))
+  por_janela <- reactive({
+    validate(need(is.numeric(input$dt_ramos) && !is.na(input$dt_ramos) && input$dt_ramos > 0,
+                  "A largura da janela deve ser > 0."))
+    media_por_janela(ramos(), input$dt_ramos)
+  })
+  # equilibrio de cada linhagem: S = N * mu / lambda (1o intervalo do skyline)
+  S_eq <- reactive({
+    p <- pronto()$parametros
+    if (is.null(p) || is.null(p$N) || !isTRUE(p$N > 0)) return(c(A = NA_real_, B = NA_real_))
+    c(A = p$N * p$deathsky_1[1] / p$lambdasky_1[1],
+      B = p$N * p$deathsky_2[1] / p$lambdasky_2[1])
+  })
+  largura <- function(id) session$clientData[[paste0("output_", id, "_width")]] %||% 900
+  
   observe({
     d <- dados(); req(d)
     ok <- which(vapply(d$resultados, is.list, logical(1)))
@@ -1617,6 +1988,40 @@ server <- function(input, output, session) {
     plot_arvores_rep(x[[1]], COR_FENO, xmax(), intro2(), FONTE)
   }, res = 96)
   
+  # ---- ramos ----
+  output$info_pares <- renderUI({
+    d <- pronto()
+    n_tot <- length(d$resultados)
+    txt <- sprintf("Pares usados: <b>%d de %d</b> (A viva em t = %g e árvore de B com pelo menos %d amostras).",
+                   length(idx_pares()), n_tot, t_intro(), input$min_amostras_B)
+    if (is.null(d$resultados_semB))
+      txt <- paste(txt, "Este resultado não tem o cenário <b>sem B</b> (grupo A): marque",
+                   "“Simular também o cenário sem a Linhagem B” e rode de novo.")
+    ajuda(HTML(txt))
+  })
+  # em tela estreita (< 600 px) os dois paineis ficam um embaixo do outro
+  desenha_ramo_tempo <- function(fam = "", empilhar = FALSE) plot_ramos_tempo(
+    por_janela(), COR_RAMOS, input$alpha_ramos, t_intro(), empilhar, fam)
+  desenha_ramo_S <- function(fam = "", empilhar = FALSE) {
+    validate(need(is.numeric(input$faixa_S) && !is.na(input$faixa_S) && input$faixa_S > 0,
+                  "A largura da faixa de S deve ser > 0."),
+             need(is.numeric(input$min_ramos) && !is.na(input$min_ramos),
+                  "Preencha o mínimo de ramos por faixa."))
+    plot_ramos_S(ramos(), input$faixa_S, input$min_ramos, S_eq(),
+                 pronto()$parametros$N %||% Inf, COR_RAMOS, empilhar, fam)
+  }
+  output$g_ramo_tempo <- renderPlot(
+    desenha_ramo_tempo(FONTE, largura("g_ramo_tempo") < 600), res = 96,
+    height = function() if (largura("g_ramo_tempo") < 600) 820 else 470)
+  output$g_ramo_S <- renderPlot(
+    desenha_ramo_S(FONTE, largura("g_ramo_S") < 600), res = 96,
+    height = function() if (largura("g_ramo_S") < 600) 820 else 470)
+  output$tab_descritivas <- renderTable({
+    tb <- descritivas_ramos(ramos(), t_intro())
+    validate(need(!is.null(tb), "Nenhum par válido."))
+    tb
+  }, digits = 3, striped = TRUE, hover = TRUE, spacing = "s")
+  
   # ---- resumo ----
   output$caixas <- renderUI({
     d <- pronto()
@@ -1636,23 +2041,18 @@ server <- function(input, output, session) {
   output$tabela <- renderTable(tabela_resumo(pronto()), na = "—",
                                striped = TRUE, hover = TRUE, spacing = "s")
   
-  output$log <- renderText({
-    d <- pronto()
-    if (is.null(d$logs)) return("Sem log (resultado carregado de arquivo).")
-    linhas <- vapply(seq_along(d$logs), function(r) {
-      l <- sub('^\\[1\\] "?(.*?)"?$', "\\1", d$logs[[r]], perl = TRUE)
-      cab <- sprintf("rep %02d  %-28s %6.2f s", r, d$status[r], d$tempos[r])
-      if (!length(l)) return(cab)
-      extra <- if (length(l) > 4) sprintf("\n    … (+%d linhas)", length(l) - 4) else ""
-      paste0(cab, "\n", paste0("    ", head(l, 4), collapse = "\n"), extra)
-    }, character(1))
-    paste(linhas, collapse = "\n")
-  })
-  
   # ---- downloads ----
   output$pdf_traj <- downloadHandler(
     filename = function() sprintf("trajetorias_%s.pdf", pronto()$model %||% "MC"),
     content  = function(file) salva_pdf(file, 8, 5, desenha_traj)
+  )
+  output$pdf_ramo_tempo <- downloadHandler(
+    filename = function() sprintf("ramo_tempo_%s.pdf", pronto()$model %||% "MC"),
+    content  = function(file) salva_pdf(file, 9, 5, desenha_ramo_tempo)
+  )
+  output$pdf_ramo_S <- downloadHandler(
+    filename = function() sprintf("ramo_suscetiveis_%s.pdf", pronto()$model %||% "MC"),
+    content  = function(file) salva_pdf(file, 9, 5, desenha_ramo_S)
   )
   output$rds <- downloadHandler(
     filename = function() sprintf("mc_%s.rds", tolower(pronto()$model %||% "resultado")),
