@@ -1290,76 +1290,81 @@ FONTE <- fonte_graficos()   # carrega a fonte uma vez, ao abrir o app
 
 # ---- interface --------------------------------------------------------
 
-ajuda <- function(...) tags$small(class = "text-muted d-block mb-2", ...)
+ajuda <- function(..., class = NULL) tags$small(class = paste("text-muted d-block mb-2", class), ...)
 
-barra_lateral <- sidebar(
-  width = 340,
-  radioButtons("model", "Modelo", c("SIR", "SIRS", "BD"),
-               selected = "SIRS", inline = TRUE),
-  conditionalPanel(
-    "input.model == 'BD'",
-    numericInput("max_inf", "Teto de infectados vivos (BD)", 1000, min = 3, step = 100),
-    checkboxInput("descartar_teto", "Descartar replicatas que atingem o teto", FALSE),
-    ajuda("Ao atingir o teto, a simulação para naquele instante (como um timestop ",
-          "antecipado). Marcado: a replicata é descartada em vez de truncada. 0 = sem teto.")
-  ),
-  layout_columns(
-    numericInput("re", "Replicatas", 20, min = 1, step = 1),
-    numericInput("seed", "Semente", 1, step = 1)
-  ),
-  ajuda("Semente vazia = aleatória."),
-  
-  accordion(
-    open = c("Taxas"),
-    accordion_panel(
-      "Parada",
-      layout_columns(
-        numericInput("timestop", "timestop", 20, min = 0),
-        numericInput("n", "n (amostras)", 0, min = 0, step = 1)
-      ),
-      ajuda("Com timestop > 0, n é ignorado. Para parar por n, use timestop = 0."),
-      numericInput("rho", "rho (amostragem final)", 0, min = 0, max = 1, step = 0.05),
-      checkboxInput("aceitar_extincao", "Aceitar extinção antes de timestop", TRUE),
-      ajuda("Desmarcado: a replicata que se extingue é descartada (conta como falha).")
+# ---- aba "Parametros": os valores que voce escolhe para rodar ----------
+# (antes ficavam na barra lateral esquerda). Cada grupo e um cartao com
+# cabecalho azul; em tela estreita os cartoes ficam um embaixo do outro.
+cartao <- function(titulo, ...) card(class = "card-param", fill = FALSE,
+                                     card_header(titulo), card_body(fill = FALSE, ...))
+
+aba_parametros <- nav_panel(
+  "Parâmetros",
+  layout_column_wrap(
+    width = "320px", fill = FALSE, heights_equal = "row",
+    cartao("Modelo e replicatas",
+           radioButtons("model", "Modelo", c("SIR", "SIRS", "BD"),
+                        selected = "SIRS", inline = TRUE),
+           conditionalPanel(
+             "input.model == 'BD'",
+             numericInput("max_inf", "Teto de infectados vivos (BD)", 1000, min = 3, step = 100),
+             checkboxInput("descartar_teto", "Descartar replicatas que atingem o teto", FALSE),
+             ajuda("Ao atingir o teto, a simulação para naquele instante (como um timestop ",
+                   "antecipado). Marcado: a replicata é descartada em vez de truncada. 0 = sem teto.")
+           ),
+           layout_columns(
+             numericInput("re", "Replicatas", 20, min = 1, step = 1),
+             numericInput("seed", "Semente", 1, step = 1)
+           ),
+           ajuda("Semente vazia = aleatória.")
     ),
-    accordion_panel(
-      "População e introdução",
-      conditionalPanel("input.model != 'BD'",
-                       numericInput("N", "N (tamanho da população)", 500, min = 2, step = 1)),
-      numericInput("timeIntro2", "Introdução da Linhagem B (tempo)", 5, min = 0),
-      checkboxInput("com_semB", "Simular também o cenário sem a Linhagem B (pares)", TRUE),
-      ajuda("Cada replicata roda de novo, com a mesma semente, sem a Linhagem B. Até a entrada de B ",
-            "os dois cenários são idênticos; a diferença depois é o efeito de B (aba Ramos). ",
-            "Dobra o tempo de simulação.")
+    cartao("Parada",
+           layout_columns(
+             numericInput("timestop", "timestop", 20, min = 0),
+             numericInput("n", "n (amostras)", 0, min = 0, step = 1)
+           ),
+           ajuda("Com timestop > 0, n é ignorado. Para parar por n, use timestop = 0."),
+           numericInput("rho", "rho (amostragem final)", 0, min = 0, max = 1, step = 0.05),
+           checkboxInput("aceitar_extincao", "Aceitar extinção antes de timestop", TRUE),
+           ajuda("Desmarcado: a replicata que se extingue é descartada (conta como falha).")
     ),
-    accordion_panel(
-      "Taxas",
-      ajuda("Um valor, ou um por intervalo separados por ponto-e-vírgula (ex.: 1.5; 0.8)."),
-      layout_columns(
-        textInput("lambda1", "λ₁", "1.5"),
-        textInput("lambda2", "λ₂", "2")
-      ),
-      layout_columns(
-        textInput("death1", "μ₁", "1"),
-        textInput("death2", "μ₂", "1")
-      ),
-      ajuda("μ = taxa de morte (deathsky). Cada morte vira amostra com a prob. de amostragem."),
-      layout_columns(
-        textInput("samp", "Prob. amostragem", "0.3"),
-        conditionalPanel("input.model == 'SIRS'", textInput("omega", "ω (perda imunidade)", "0.1"))
-      ),
-      textInput("timesky", "Tempos de mudança (skyline)", "", placeholder = "vazio = taxas constantes")
+    cartao("População e introdução",
+           conditionalPanel("input.model != 'BD'",
+                            numericInput("N", "N (tamanho da população)", 500, min = 2, step = 1)),
+           numericInput("timeIntro2", "Introdução da Linhagem B (tempo)", 5, min = 0),
+           checkboxInput("com_semB", "Simular também o cenário sem a Linhagem B (pares)", TRUE),
+           ajuda("Cada replicata roda de novo, com a mesma semente, sem a Linhagem B. Até a entrada de B ",
+                 "os dois cenários são idênticos; a diferença depois é o efeito de B (aba Ramos). ",
+                 "Dobra o tempo de simulação.")
     ),
-    accordion_panel(
-      "Execução",
-      numericInput("limite", "Tempo máx. por replicata (s)", 60, min = 0),
-      ajuda("Interrompe replicatas que explodem (comum no BD). 0 = sem limite.")
+    cartao("Taxas",
+           ajuda("Um valor, ou um por intervalo separados por ponto-e-vírgula (ex.: 1.5; 0.8)."),
+           layout_columns(
+             textInput("lambda1", "λ₁", "1.5"),
+             textInput("lambda2", "λ₂", "2")
+           ),
+           layout_columns(
+             textInput("death1", "μ₁", "1"),
+             textInput("death2", "μ₂", "1")
+           ),
+           ajuda("μ = taxa de morte (deathsky). Cada morte vira amostra com a prob. de amostragem."),
+           layout_columns(
+             textInput("samp", "Prob. amostragem", "0.3"),
+             conditionalPanel("input.model == 'SIRS'", textInput("omega", "ω (perda imunidade)", "0.1"))
+           ),
+           textInput("timesky", "Tempos de mudança (skyline)", "", placeholder = "vazio = taxas constantes")
+    ),
+    cartao("Execução",
+           numericInput("limite", "Tempo máx. por replicata (s)", 60, min = 0),
+           ajuda("Interrompe replicatas que explodem (comum no BD). 0 = sem limite."),
+           actionButton("rodar", "Rodar simulação", class = "btn-primary btn-lg w-100 mt-1",
+                        icon = icon("play")),
+           ajuda(class = "mt-2", "Ao terminar, o app abre a aba Trajetórias."),
+           hr(class = "my-2"),
+           fileInput("arquivo", "…ou carregue um resultado salvo (.rds)", accept = ".rds",
+                     buttonLabel = "Abrir", placeholder = "ex.: mc_sirs_1.rds")
     )
-  ),
-  actionButton("rodar", "Rodar simulação", class = "btn-primary w-100", icon = icon("play")),
-  hr(class = "my-1"),
-  fileInput("arquivo", "…ou carregue um resultado salvo (.rds)", accept = ".rds",
-            buttonLabel = "Abrir", placeholder = "ex.: mc_sirs_1.rds")
+  )
 )
 
 aba <- function(titulo, controles, saida) {
@@ -1633,6 +1638,10 @@ aba_sobre <- nav_panel(
       # ---------------------------------------------------------------
       tags$h4("4. O que cada aba mostra"),
       tags$ul(
+        tags$li(HTML("<b>Parâmetros:</b> Onde você escolhe o modelo e os valores, roda a simulação
+        ou carrega um resultado salvo (.rds).")),
+        tags$li(HTML("<b>Resumo:</b> Uma linha por replicata, com status, número de amostras, pico de
+        infectados e tamanho das árvores.")),
         tags$li(HTML("<b>Trajetórias:</b> Número de infectados vivos de cada linhagem ao longo do
         tempo; o tracejado marca a entrada da Linhagem B. Dá para trocar
         por suscetíveis, recuperados ou amostras acumuladas e mostrar a mediana.")),
@@ -1642,37 +1651,20 @@ aba_sobre <- nav_panel(
         com B e da Linhagem B, em pares com a mesma semente: comprimento médio dos ramos ao longo do
         tempo, comprimento dos ramos em função dos suscetíveis (com o equilíbrio S = N·μ/λ de cada
         linhagem) e estatísticas descritivas antes e depois da entrada de B.")),
-        tags$li(HTML("<b>Resumo:</b> Uma linha por replicata, com status, número de amostras, pico de
-        infectados e tamanho das árvores.")),
       )
   )
 )
 
-# Cabecalhos que abrem/fecham (Parada, Populacao, Taxas, Execucao) na cor
-# primaria do tema (#073A70), abertos ou fechados, com texto e seta brancos.
-# O conteudo da secao aberta ganha um fundo azul bem claro.
-# var(--bs-primary) segue o 'primary' do bs_theme: mudou la, muda aqui.
+# Cartoes da aba Parametros (Parada, Populacao, Taxas, Execucao) com
+# cabecalho na cor primaria do tema (#073A70) e texto branco; o corpo ganha
+# um fundo azul bem claro. var(--bs-primary) segue o 'primary' do bs_theme.
 css_secoes <- "
-.sidebar .accordion .accordion-button,
-.sidebar .accordion .accordion-button:not(.collapsed) {
+.card-param > .card-header {
   background-color: var(--bs-primary);
   color: #fff;
   font-weight: 600;
-  box-shadow: none;
 }
-.sidebar .accordion .accordion-button:hover {
-  background-color: rgba(var(--bs-primary-rgb), .85);
-}
-.sidebar .accordion .accordion-button:focus {
-  box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .35);
-}
-.sidebar .accordion .accordion-button::after {
-  filter: brightness(0) invert(1);              /* seta branca */
-}
-.sidebar .accordion .accordion-item {
-  border-color: #fff;                           /* separa as faixas azuis */
-}
-.sidebar .accordion .accordion-body {
+.card-param > .card-body {
   background-color: rgba(var(--bs-primary-rgb), .05);
 }
 /* aba Sobre o modelo */
@@ -1712,27 +1704,10 @@ css_secoes <- "
 .form-control, .btn, table {
   font-family: inherit;                         /* tudo na fonte do tema */
 }
-/* barra do titulo: azul com letras brancas */
-.bslib-page-title,
-.bslib-page-sidebar > .navbar {
-  background-color: var(--bs-primary) !important;
-  color: #fff !important;
-  border-bottom: none !important;
-  font-size: 1.2rem !important;                 /* titulo longo: cabe numa linha */
-}
-.bslib-page-sidebar > .navbar .navbar-brand { color: #fff !important; font-size: 1.2rem !important; }
-
-/* titulo longo quebra linha em qualquer versao do bslib. Nas versoes novas
-   o titulo e um 'navbar-brand' do Bootstrap, que por padrao NUNCA quebra
-   linha: o titulo ficava mais largo que a janela e empurrava a pagina toda
-   para o lado (barra lateral cortada, faixa azul terminando antes da borda) */
-.bslib-page-title,
-.bslib-page-sidebar > .navbar .navbar-brand {
-  white-space: normal !important;
-  min-width: 0;
-  max-width: 100%;
-}
-.bslib-page-sidebar > .navbar .container-fluid { min-width: 0; }
+/* faixa do titulo: azul com letras brancas; o titulo longo quebra linha */
+.titulo-app { background-color: var(--bs-primary); color: #fff; font-size: 1.2rem;
+  line-height: 1.35; padding: .85rem 1.5rem; margin-bottom: 1rem; }
+.conteudo-app { padding: 0 1.5rem 1.5rem; }
 
 /* janelas estreitas (computador com janela pequena, tablet): a tabela de
    parametros da aba Sobre quebra linha em vez de sair do cartao */
@@ -1755,8 +1730,8 @@ css_secoes <- "
 #tab_descritivas td, #tab_descritivas th { white-space: nowrap; }
 #tab_descritivas table { font-size: .84rem; }
 @media (max-width: 575.98px) {
-  .bslib-page-title,
-  .bslib-page-sidebar > .navbar .navbar-brand { font-size: 1rem !important; line-height: 1.3; }
+  .titulo-app { font-size: 1rem; padding: .7rem 1rem; margin-bottom: .6rem; }
+  .conteudo-app { padding: 0 .4rem 1rem; }
   .sobre { padding: 0 .25rem 1.5rem; }
   .sobre .figura { overflow-x: auto; }                 /* figura: arrasta para o lado */
   .sobre .figura svg { min-width: 620px; }
@@ -1775,14 +1750,21 @@ tema <- bs_theme(version = 5, primary = "#073A70",
                    "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif")) |>
   bs_add_rules(css_secoes)
 
-ui <- page_sidebar(
-  title = "Modelos epidemiológicos de Nascimento e Morte dependentes da densidade para árvores filogenéticas · SIR / SIRS / BD",
+TITULO_APP <- "Modelos epidemiológicos de Nascimento e Morte dependentes da densidade para árvores filogenéticas · SIR / SIRS / BD"
+
+ui <- page(
+  title = TITULO_APP,
   theme = tema,
-  fillable = FALSE,   # a pagina rola em vez de espremer os graficos (celular deitado)
-  sidebar = barra_lateral,
-  navset_card_tab(
+  div(class = "titulo-app", TITULO_APP),          # faixa azul com o titulo
+  div(class = "conteudo-app", navset_card_tab(
     id = "abas",
     aba_sobre,
+    aba_parametros,
+    nav_panel("Resumo",
+              uiOutput("caixas"),
+              div(class = "d-flex justify-content-end mb-2",
+                  downloadButton("rds", "Baixar resultados (.rds)", class = "btn-sm")),
+              tableOutput("tabela")),
     aba("Trajetórias",
         tagList(
           selectInput("variavel", "Variável", VARIAVEIS_TRAJ),
@@ -1824,17 +1806,11 @@ ui <- page_sidebar(
           hr(),
           tags$h6(class = "fw-bold", "Estatísticas descritivas dos ramos"),
           tableOutput("tab_descritivas")
-        )),
-    nav_panel("Resumo",
-              uiOutput("caixas"),
-              div(class = "d-flex justify-content-end mb-2",
-                  downloadButton("rds", "Baixar resultados (.rds)", class = "btn-sm")),
-              tableOutput("tabela"))
-  ),
-  # telas pequenas (celular, tablet): as barras laterais se recolhem para
-  # sobrar espaco para os graficos. Os controles de cada aba comecam
-  # fechados, e a barra de parametros fecha ao clicar em "Rodar simulacao".
-  # No computador (tela >= 992 px) nada muda. As setas reabrem as barras.
+        ))
+  )),
+  # telas pequenas (celular, tablet): os controles de cada aba (barra da
+  # direita) comecam fechados, para sobrar espaco para os graficos. No
+  # computador (tela >= 992 px) nada muda. As setas reabrem as barras.
   div(id = "aviso-celular"),
   tags$script(HTML("
     // Celular mostrando o app 'encolhido': dentro de outra pagina (ex.: painel
@@ -1861,17 +1837,13 @@ ui <- page_sidebar(
       aviso.querySelector('.fechar').onclick = function() { aviso.style.display = 'none'; };
     });
 
-    function fecharPaineis(incluirPrincipal) {
+    function fecharPaineis() {
       if (window.innerWidth >= 992) return;
       document.querySelectorAll('.bslib-sidebar-layout > .collapse-toggle').forEach(function(t) {
-        var layout = t.parentElement;
-        var principal = !layout.classList.contains('sidebar-right');
-        var aberta = !layout.classList.contains('sidebar-collapsed');
-        if ((incluirPrincipal || !principal) && aberta) t.click();
+        if (!t.parentElement.classList.contains('sidebar-collapsed')) t.click();
       });
     }
-    $(document).on('shiny:connected', function() { setTimeout(function() { fecharPaineis(false); }, 300); });
-    $(document).on('click', '#rodar', function() { fecharPaineis(true); });
+    $(document).on('shiny:connected', function() { setTimeout(fecharPaineis, 300); });
   "))
 )
 
@@ -1901,7 +1873,7 @@ server <- function(input, output, session) {
       )))
     })
     dados(res)
-    if (identical(input$abas, "Sobre o modelo")) nav_select("abas", "Trajetórias")
+    nav_select("abas", "Trajetórias")
     
     n_ok   <- n_validas(res)
     n_teto <- sum(grepl("teto", res$status))
@@ -1926,7 +1898,7 @@ server <- function(input, output, session) {
     if (is.null(obj$status))
       obj$status <- ifelse(vapply(obj$resultados, is.list, logical(1)), "ok", "falhou")
     dados(obj)
-    if (identical(input$abas, "Sobre o modelo")) nav_select("abas", "Trajetórias")
+    nav_select("abas", "Trajetórias")
     showNotification(sprintf("Carregado: %d replicatas (%d ok).",
                              length(obj$resultados), n_validas(obj)),
                      type = "message")
